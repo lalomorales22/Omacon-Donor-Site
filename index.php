@@ -34,6 +34,13 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{$
     <div class="app-frame">
       <header class="chrome-bar">
         <div class="chrome-title">
+          <div class="workspace-pager" aria-label="workspace screens">
+            <button type="button" class="workspace-switch" data-workspace-mode="console" aria-label="Screen 1: Launch Sponsorship">1</button>
+            <button type="button" class="workspace-switch" data-workspace-mode="directory" aria-label="Screen 2: Sponsor Notes">2</button>
+            <button type="button" class="workspace-switch" data-workspace-mode="wall" aria-label="Screen 3: Omacon Field">3</button>
+            <button type="button" class="workspace-switch" data-workspace-mode="command" aria-label="Screen 4: Video and Conference Package">4</button>
+            <button type="button" class="workspace-switch" data-workspace-mode="grid" aria-label="Screen 5: Quad View">5</button>
+          </div>
           <span>OMACON // SPONSORSHIP DESK</span>
           <span id="clockLabel">--:--</span>
         </div>
@@ -44,6 +51,53 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{$
           <a href="#viewerModal" class="chrome-button" data-action="open-viewer">open wall</a>
         </div>
       </header>
+
+      <aside id="keybindWidget" class="keybind-widget is-visible" aria-label="Omarchy key bindings">
+        <div class="keybind-widget-top">
+          <div class="workspace-pager workspace-pager-widget">
+            <button type="button" class="workspace-switch" data-workspace-mode="console" tabindex="-1">1</button>
+            <button type="button" class="workspace-switch" data-workspace-mode="directory" tabindex="-1">2</button>
+            <button type="button" class="workspace-switch" data-workspace-mode="wall" tabindex="-1">3</button>
+            <button type="button" class="workspace-switch" data-workspace-mode="command" tabindex="-1">4</button>
+            <button type="button" class="workspace-switch" data-workspace-mode="grid" tabindex="-1">5</button>
+          </div>
+          <button type="button" class="keybind-close" id="closeKeybindsBtn" aria-label="Hide keybindings">close</button>
+        </div>
+        <div class="keybind-widget-copy">
+          <p class="tile-kicker">omarchy layer</p>
+          <h2>Omarchy Key Bindings</h2>
+        </div>
+        <div class="keybind-list" role="list">
+          <div class="keybind-row" role="listitem">
+            <strong>SUPER + K</strong>
+            <span>Show the Omarchy key bindings.</span>
+          </div>
+          <div class="keybind-row keybind-row-accent" role="listitem">
+            <strong>SUPER + O</strong>
+            <span>Open wall in the full-screen field viewer.</span>
+          </div>
+          <div class="keybind-row" role="listitem">
+            <strong>SUPER + S</strong>
+            <span>Launch Sponsorship</span>
+          </div>
+          <div class="keybind-row" role="listitem">
+            <strong>SUPER + N</strong>
+            <span>Sponsor Notes</span>
+          </div>
+          <div class="keybind-row" role="listitem">
+            <strong>SUPER + F</strong>
+            <span>Omacon Field release wall</span>
+          </div>
+          <div class="keybind-row" role="listitem">
+            <strong>SUPER + V</strong>
+            <span>Video and conference package</span>
+          </div>
+          <div class="keybind-row keybind-row-accent" role="listitem">
+            <strong>SUPER + 1 .. 5</strong>
+            <span>Switch screens, with 5 returning to the quad view.</span>
+          </div>
+        </div>
+      </aside>
 
       <main class="workspace">
         <section class="tile tile-command" data-pane="command">

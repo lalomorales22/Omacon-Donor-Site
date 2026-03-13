@@ -20,6 +20,19 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
 const tierMap = new Map((bootstrap.tiers || []).map((tier) => [tier.key, tier]));
 const DEFAULT_TILE_ORDER = ['command', 'console', 'wall', 'directory'];
 const TILE_ORDER_STORAGE_KEY = 'prime.workspace.order';
+const WORKSPACE_SHORTCUTS = {
+  k: 'keybinds',
+  o: 'viewer',
+  s: 'console',
+  n: 'directory',
+  f: 'wall',
+  v: 'command',
+  1: 'console',
+  2: 'directory',
+  3: 'wall',
+  4: 'command',
+  5: 'grid',
+};
 const initialTileOrder = loadTileOrder();
 
 const state = {
@@ -36,19 +49,25 @@ const state = {
   search: '',
   tileOrder: initialTileOrder,
   activePane: initialTileOrder[0] || 'command',
+  workspaceMode: 'grid',
   dragPane: null,
   dropPane: null,
   fitQueued: false,
   uploadedLogoUrl: '',
   uploadingLogo: false,
   refreshing: false,
+  keybindsVisible: true,
 };
 
 const elements = {
   workspace: document.querySelector('.workspace'),
   tiles: Array.from(document.querySelectorAll('.workspace .tile')),
+  dragHandles: Array.from(document.querySelectorAll('[data-drag-handle]')),
+  workspaceSwitches: Array.from(document.querySelectorAll('[data-workspace-mode]')),
   fitPanes: Array.from(document.querySelectorAll('[data-fit-pane]')),
   clock: document.getElementById('clockLabel'),
+  keybindWidget: document.getElementById('keybindWidget'),
+  closeKeybindsBtn: document.getElementById('closeKeybindsBtn'),
   metricRaised: document.getElementById('metricRaised'),
   metricDonors: document.getElementById('metricDonors'),
   metricAverage: document.getElementById('metricAverage'),
@@ -591,6 +610,25 @@ function loadTileOrder() {
   return [...DEFAULT_TILE_ORDER];
 }
 
+function isSingleWorkspaceMode(mode) {
+  return DEFAULT_TILE_ORDER.includes(mode);
+}
+
+function workspaceModeLabel(mode) {
+  switch (mode) {
+    case 'console':
+      return 'Launch Sponsorship';
+    case 'directory':
+      return 'Sponsor Notes';
+    case 'wall':
+      return 'Omacon Field';
+    case 'command':
+      return 'Video and conference package';
+    default:
+      return 'Quad view';
+  }
+}
+
 function escapeHtml(value = '') {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -773,14 +811,37 @@ function schedulePaneFit() {
   });
 }
 
+function renderWorkspaceSwitches() {
+  elements.workspaceSwitches.forEach((button) => {
+    const mode = button.dataset.workspaceMode || 'grid';
+    const active = state.workspaceMode === mode;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+    button.title = workspaceModeLabel(mode);
+  });
+}
+
 function renderWorkspace() {
+  const singleMode = isSingleWorkspaceMode(state.workspaceMode);
+  elements.workspace.classList.toggle('is-single', singleMode);
+  elements.workspace.dataset.workspaceMode = state.workspaceMode;
+
   elements.tiles.forEach((tile) => {
     const paneId = tile.dataset.pane || '';
-    tile.style.order = String(state.tileOrder.indexOf(paneId));
+    const isActivePane = !singleMode || paneId === state.workspaceMode;
+
+    tile.hidden = singleMode && !isActivePane;
+    tile.style.order = singleMode ? '0' : String(state.tileOrder.indexOf(paneId));
     tile.classList.toggle('is-dragging', paneId === state.dragPane);
     tile.classList.toggle('is-drop-target', paneId === state.dropPane && paneId !== state.dragPane);
+    tile.classList.toggle('is-workspace-active', isActivePane);
   });
 
+  elements.dragHandles.forEach((handle) => {
+    handle.draggable = !singleMode;
+  });
+
+  renderWorkspaceSwitches();
   schedulePaneFit();
   requestAnimationFrame(() => miniViewer.resize());
 }
@@ -791,6 +852,20 @@ function setActivePane(paneId) {
   }
 
   state.activePane = paneId;
+  renderWorkspace();
+}
+
+function setWorkspaceMode(mode) {
+  if (mode !== 'grid' && !DEFAULT_TILE_ORDER.includes(mode)) {
+    return;
+  }
+
+  state.dragPane = null;
+  state.dropPane = null;
+  state.workspaceMode = mode;
+  if (mode !== 'grid') {
+    state.activePane = mode;
+  }
   renderWorkspace();
 }
 
@@ -828,6 +903,11 @@ function bindWorkspace() {
     });
 
     handle.addEventListener('dragstart', (event) => {
+      if (state.workspaceMode !== 'grid') {
+        event.preventDefault();
+        return;
+      }
+
       if (event.target.closest('button, input, a, label, textarea, select')) {
         event.preventDefault();
         return;
@@ -862,6 +942,10 @@ function bindWorkspace() {
     });
 
     tile.addEventListener('dragover', (event) => {
+      if (state.workspaceMode !== 'grid') {
+        return;
+      }
+
       if (!state.dragPane || state.dragPane === paneId) {
         return;
       }
@@ -874,6 +958,10 @@ function bindWorkspace() {
     });
 
     tile.addEventListener('drop', (event) => {
+      if (state.workspaceMode !== 'grid') {
+        return;
+      }
+
       const sourceId = state.dragPane || event.dataTransfer?.getData('text/plain') || '';
       if (!sourceId || sourceId === paneId) {
         clearTileDragState(sourceId || state.activePane);
@@ -887,12 +975,16 @@ function bindWorkspace() {
   });
 
   elements.workspace.addEventListener('dragover', (event) => {
-    if (state.dragPane) {
+    if (state.workspaceMode === 'grid' && state.dragPane) {
       event.preventDefault();
     }
   });
 
   elements.workspace.addEventListener('drop', (event) => {
+    if (state.workspaceMode !== 'grid') {
+      return;
+    }
+
     const targetTile = event.target.closest('.tile');
     if (!targetTile && state.dragPane) {
       clearTileDragState(state.dragPane);
@@ -1327,15 +1419,109 @@ function closeViewer(event) {
   elements.viewerModal.classList.remove('is-open');
   elements.viewerModal.setAttribute('aria-hidden', 'true');
   document.body.classList.remove('modal-open');
+  fullViewer.keysPressed = {};
   if (window.location.hash === '#viewerModal') {
     history.replaceState({}, '', window.location.pathname);
   }
+}
+
+function showKeybindsWidget(autoHide = true) {
+  state.keybindsVisible = true;
+  elements.keybindWidget?.classList.add('is-visible');
+  clearTimeout(showKeybindsWidget.timer);
+
+  if (autoHide) {
+    showKeybindsWidget.timer = window.setTimeout(() => hideKeybindsWidget(), 9000);
+  }
+}
+
+function hideKeybindsWidget() {
+  state.keybindsVisible = false;
+  elements.keybindWidget?.classList.remove('is-visible');
+  clearTimeout(showKeybindsWidget.timer);
+}
+
+function isEditableTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+}
+
+function activateWorkspaceMode(mode) {
+  if (mode === 'grid') {
+    setWorkspaceMode('grid');
+    return;
+  }
+
+  if (!DEFAULT_TILE_ORDER.includes(mode)) {
+    return;
+  }
+
+  setWorkspaceMode(mode);
+
+  if (mode === 'wall') {
+    requestAnimationFrame(() => miniViewer.showAll());
+  }
+}
+
+function handleWorkspaceShortcut(event) {
+  const key = event.key.toLowerCase();
+
+  if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+    return false;
+  }
+
+  if (isEditableTarget(event.target)) {
+    return false;
+  }
+
+  const mode = WORKSPACE_SHORTCUTS[key];
+  if (!mode) {
+    return false;
+  }
+
+  event.preventDefault();
+  const viewerIsOpen = elements.viewerModal.classList.contains('is-open');
+
+  if (mode === 'viewer') {
+    openViewer();
+    hideKeybindsWidget();
+    return true;
+  }
+
+  if (mode === 'keybinds') {
+    if (state.keybindsVisible) {
+      hideKeybindsWidget();
+    } else {
+      showKeybindsWidget(false);
+    }
+    return true;
+  }
+
+  if (viewerIsOpen) {
+    closeViewer();
+  }
+
+  activateWorkspaceMode(mode);
+  hideKeybindsWidget();
+  return true;
 }
 
 function bindEvents() {
   renderClock();
   window.setInterval(renderClock, 60_000);
   bindWorkspace();
+
+  elements.workspaceSwitches.forEach((button) => {
+    button.addEventListener('click', () => {
+      const mode = button.dataset.workspaceMode || 'grid';
+      activateWorkspaceMode(mode);
+    });
+  });
+
+  elements.closeKeybindsBtn?.addEventListener('click', hideKeybindsWidget);
 
   [
     elements.companyInput,
@@ -1377,10 +1563,20 @@ function bindEvents() {
   });
 
   document.addEventListener('keydown', (event) => {
+    if (handleWorkspaceShortcut(event)) {
+      return;
+    }
+
     if (event.key === 'Escape' && elements.viewerModal.classList.contains('is-open')) {
       closeViewer();
       return;
     }
+
+    if (event.key === 'Escape' && state.keybindsVisible) {
+      hideKeybindsWidget();
+      return;
+    }
+
     const key = event.key.toLowerCase();
     if (['w', 'a', 's', 'd'].includes(key) && elements.viewerModal.classList.contains('is-open')) {
       fullViewer.keysPressed[key] = true;
@@ -1404,6 +1600,11 @@ function bindEvents() {
   window.addEventListener('resize', schedulePaneFit);
   window.addEventListener('load', schedulePaneFit, { once: true });
   document.fonts?.ready.then(schedulePaneFit);
+  window.addEventListener('pointerdown', () => {
+    if (state.keybindsVisible) {
+      hideKeybindsWidget();
+    }
+  }, { once: true });
 }
 
 const miniViewer = new DonorWallViewer(elements.miniViewer, {
@@ -1435,6 +1636,7 @@ function initialize() {
   bindEvents();
   miniViewer.showAll();
   fullViewer.showAll();
+  showKeybindsWidget();
   schedulePaneFit();
   handlePaymentReturn();
 }
