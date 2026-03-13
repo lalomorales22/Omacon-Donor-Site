@@ -4,6 +4,7 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 prime_require_method('POST');
+prime_require_same_origin();
 
 if (!isset($_FILES['logo']) || !is_array($_FILES['logo'])) {
     prime_json_response(['error' => 'No logo upload found.'], 422);

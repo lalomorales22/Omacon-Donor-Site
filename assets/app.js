@@ -139,15 +139,18 @@ class DonorWallViewer {
     this.cardEntries = [];
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x050608, 20, 80);
+    this.scene.fog = new THREE.Fog(0x050608, 30, 240);
     this.group = new THREE.Group();
     this.scene.add(this.group);
 
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 600);
     this.camera.position.set(0, 0, 30);
     this.cameraGoal = this.camera.position.clone();
     this.targetGoal = new THREE.Vector3(0, 0, 0);
     this.keysPressed = {};
+    this.viewMode = 'overview';
+    this.viewportWidth = 0;
+    this.viewportHeight = 0;
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -156,6 +159,9 @@ class DonorWallViewer {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setClearColor(0x000000, 0);
+    this.renderer.domElement.style.display = 'block';
+    this.renderer.domElement.style.width = '100%';
+    this.renderer.domElement.style.height = '100%';
     this.container.appendChild(this.renderer.domElement);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -167,6 +173,11 @@ class DonorWallViewer {
     this.controls.maxDistance = 80;
     this.controls.zoomSpeed = 1.2;
     this.controls.target.copy(this.targetGoal);
+    this.controls.addEventListener('start', () => {
+      if (!this._animatingTo) {
+        this.viewMode = 'free';
+      }
+    });
     if (!this.interactive) {
       this.controls.enableRotate = true;
       this.controls.autoRotateSpeed = 0.3;
@@ -246,9 +257,17 @@ class DonorWallViewer {
       return;
     }
 
+    const resized = width !== this.viewportWidth || height !== this.viewportHeight;
+    this.viewportWidth = width;
+    this.viewportHeight = height;
+
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height, false);
+    this.renderer.setSize(width, height);
+
+    if (resized && this.cardEntries.length && this.viewMode === 'overview') {
+      this.frameDonors();
+    }
   }
 
   createCardTexture(donor) {
@@ -343,8 +362,6 @@ class DonorWallViewer {
     this.cardEntries = [];
 
     const list = Array.isArray(donors) ? donors : [];
-    const spread = Math.max(8, Math.sqrt(list.length) * 5);
-
     list.forEach((donor, index) => {
       const texture = this.createCardTexture(donor);
       const material = new THREE.MeshStandardMaterial({
@@ -353,18 +370,20 @@ class DonorWallViewer {
         metalness: 0.08,
         emissive: new THREE.Color(0x120702),
         emissiveIntensity: 0.48,
+        side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.88, 1, 1), material);
 
-      const golden = (1 + Math.sqrt(5)) / 2;
-      const theta = index * golden * Math.PI * 2;
-      const r = Math.sqrt(index + 0.5) / Math.sqrt(list.length) * spread;
-      const x = Math.cos(theta) * r;
-      const y = Math.sin(theta) * r;
-      const z = (Math.sin(index * 1.7) * 0.5 + Math.cos(index * 2.3) * 0.3) * 2;
+      const [gridX, gridY] = spiralGridCoordinate(index);
+      const spacingX = 5.8;
+      const spacingY = 3.8;
+      const x = gridX * spacingX + Math.sin(index * 1.41) * 0.35;
+      const y = gridY * spacingY + Math.cos(index * 1.13) * 0.28;
+      const z = Math.sin(index * 0.87) * 0.9 + Math.cos(index * 1.43) * 0.4 - Math.hypot(gridX, gridY) * 0.08;
 
       mesh.position.set(x, y, z);
-      mesh.rotation.z = (Math.random() - 0.5) * 0.12;
+      mesh.rotation.z = Math.sin(index * 2.11) * 0.06;
+      mesh.rotation.y = Math.cos(index * 1.61) * 0.05;
       mesh.userData.donorId = donor.id;
 
       this.group.add(mesh);
@@ -383,12 +402,21 @@ class DonorWallViewer {
 
   computeFitDistance() {
     if (!this.cardEntries.length) {
-      return { center: new THREE.Vector3(), dist: 12 };
+      return {
+        center: new THREE.Vector3(),
+        dist: 12,
+        size: new THREE.Vector3(0, 0, 0),
+      };
     }
 
     const box = new THREE.Box3();
+    const cardHalfWidth = 1.9;
+    const cardHalfHeight = 1.2;
+    const cardHalfDepth = 0.75;
     this.cardEntries.forEach((entry) => {
-      box.expandByPoint(entry.basePosition);
+      const pos = entry.basePosition;
+      box.expandByPoint(new THREE.Vector3(pos.x - cardHalfWidth, pos.y - cardHalfHeight, pos.z - cardHalfDepth));
+      box.expandByPoint(new THREE.Vector3(pos.x + cardHalfWidth, pos.y + cardHalfHeight, pos.z + cardHalfDepth));
     });
 
     const center = new THREE.Vector3();
@@ -399,20 +427,24 @@ class DonorWallViewer {
     const fovRad = this.camera.fov * (Math.PI / 180);
     const aspect = this.camera.aspect || 1;
     const hFov = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
-    const pad = 2;
-    const distV = (size.y / 2 + pad) / Math.tan(fovRad / 2);
-    const distH = (size.x / 2 + pad) / Math.tan(hFov / 2);
-    const dist = Math.max(distV, distH, 10) * 1.15;
+    const padX = 1.5;
+    const padY = 1.2;
+    const distV = (size.y / 2 + padY) / Math.tan(fovRad / 2);
+    const distH = (size.x / 2 + padX) / Math.tan(hFov / 2);
+    const dist = Math.max(distV, distH, 10) + size.z * 0.9 + 2.5;
 
-    return { center, dist };
+    return { center, dist, size };
   }
 
   frameDonors() {
     const { center, dist } = this.computeFitDistance();
+    this.viewMode = 'overview';
     this.targetGoal.copy(center);
-    this.cameraGoal.set(center.x, center.y, dist);
+    this.cameraGoal.set(center.x, center.y, center.z + dist);
+    this.controls.maxDistance = Math.max(120, dist * 3.5);
     this.camera.position.copy(this.cameraGoal);
     this.controls.target.copy(this.targetGoal);
+    this.controls.update();
     this._animatingTo = false;
   }
 
@@ -427,24 +459,34 @@ class DonorWallViewer {
     }
 
     const pos = entry.basePosition;
+    this.viewMode = 'focus';
     this.targetGoal.set(pos.x, pos.y, pos.z);
-    this.cameraGoal.set(pos.x, pos.y, pos.z + 6.5);
+    this.cameraGoal.set(pos.x, pos.y, pos.z + 8);
     this.controls.autoRotate = false;
     this._animatingTo = true;
   }
 
   showAll() {
     const { center, dist } = this.computeFitDistance();
+    this.viewMode = 'overview';
     this.targetGoal.copy(center);
-    this.cameraGoal.set(center.x, center.y, dist);
+    this.cameraGoal.set(center.x, center.y, center.z + dist);
+    this.controls.maxDistance = Math.max(120, dist * 3.5);
     this.controls.autoRotate = false;
     this._animatingTo = true;
   }
 
   shuffleCamera() {
-    const { center, dist } = this.computeFitDistance();
+    const { center, dist, size } = this.computeFitDistance();
     const angle = Math.random() * Math.PI * 0.8 - Math.PI * 0.4;
-    this.cameraGoal.set(center.x + Math.sin(angle) * 6, center.y + Math.random() * 2 - 1, dist * 0.8);
+    const sweepX = Math.max(size.x * 0.18, 8);
+    const sweepY = Math.max(size.y * 0.2, 4);
+    this.viewMode = 'free';
+    this.cameraGoal.set(
+      center.x + Math.sin(angle) * sweepX,
+      center.y + Math.cos(angle * 1.7) * sweepY,
+      center.z + dist * 0.92
+    );
     this.targetGoal.copy(center);
     this.controls.autoRotate = true;
     this._animatingTo = true;
@@ -625,6 +667,31 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
     const lastLine = words.length > 0 && lineCount >= maxLines - 1 ? `${line.slice(0, Math.max(line.length - 3, 0))}...` : line;
     ctx.fillText(lastLine, x, y + lineCount * lineHeight);
   }
+}
+
+function spiralGridCoordinate(index) {
+  if (index <= 0) {
+    return [0, 0];
+  }
+
+  const layer = Math.ceil((Math.sqrt(index + 1) - 1) / 2);
+  const sideLength = layer * 2;
+  const maxValueInLayer = (sideLength + 1) ** 2 - 1;
+  const offset = maxValueInLayer - index;
+
+  if (offset < sideLength) {
+    return [layer - offset, -layer];
+  }
+
+  if (offset < sideLength * 2) {
+    return [-layer, -layer + (offset - sideLength)];
+  }
+
+  if (offset < sideLength * 3) {
+    return [-layer + (offset - sideLength * 2), layer];
+  }
+
+  return [layer, layer - (offset - sideLength * 3)];
 }
 
 function getTier(key) {
@@ -1248,7 +1315,10 @@ function openViewer(event) {
   if (window.location.hash !== '#viewerModal') {
     history.replaceState({}, '', `${window.location.pathname}#viewerModal`);
   }
-  fullViewer.resize();
+  requestAnimationFrame(() => {
+    fullViewer.resize();
+    fullViewer.showAll();
+  });
   renderDetailPanel(elements.modalDetailPanel, selectedDonor());
 }
 

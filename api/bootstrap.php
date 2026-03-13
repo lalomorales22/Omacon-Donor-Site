@@ -62,6 +62,34 @@ function prime_initialize_storage(): void
     if (!is_dir(PRIME_UPLOAD_DIR)) {
         mkdir(PRIME_UPLOAD_DIR, 0775, true);
     }
+
+    prime_ensure_upload_guard();
+}
+
+function prime_ensure_upload_guard(): void
+{
+    $guardPath = PRIME_UPLOAD_DIR . '/.htaccess';
+
+    if (is_file($guardPath)) {
+        return;
+    }
+
+    $guardRules = <<<HTACCESS
+# Prevent PHP execution in the uploads directory
+php_flag engine off
+
+# Block access to any PHP-like files as a safety net
+<FilesMatch "\\.ph(p[0-9]?|tml|ar)$">
+    Require all denied
+</FilesMatch>
+
+# Only allow image files to be served
+<FilesMatch "\\.(?i:png|jpe?g|gif|webp)$">
+    Require all granted
+</FilesMatch>
+HTACCESS;
+
+    file_put_contents($guardPath, $guardRules . PHP_EOL);
 }
 
 function prime_env(string $key, ?string $default = null): ?string
@@ -531,10 +559,26 @@ function prime_require_method(string $method): void
     }
 }
 
+function prime_require_same_origin(): void
+{
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+
+    if ($origin === '') {
+        return;
+    }
+
+    $base = prime_base_url();
+
+    if (!str_starts_with($origin, $base)) {
+        prime_json_response(['error' => 'Cross-origin request blocked.'], 403);
+    }
+}
+
 function prime_json_response(array $payload, int $status = 200): never
 {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
+    header('X-Content-Type-Options: nosniff');
     echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit;
 }

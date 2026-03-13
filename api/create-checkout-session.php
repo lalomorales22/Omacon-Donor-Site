@@ -4,6 +4,7 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 prime_require_method('POST');
+prime_require_same_origin();
 prime_assert_stripe_ready();
 
 $payload = prime_request_json();

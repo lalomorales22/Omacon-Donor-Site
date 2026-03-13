@@ -317,6 +317,7 @@ a {
 }
 
 .tile-body {
+  flex: 1 1 auto;
   min-height: 0;
   padding: 10px;
   display: flex;
@@ -794,6 +795,8 @@ textarea {
 }
 
 .viewer-tile-body {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 10px;
@@ -801,8 +804,11 @@ textarea {
 
 .viewer-frame,
 .viewer-stage {
+  display: grid;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 240px;
   position: relative;
-  min-height: 0;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background:
@@ -813,12 +819,21 @@ textarea {
 }
 
 .viewer-surface {
+  grid-area: 1 / 1;
   width: 100%;
   height: 100%;
   min-height: 0;
 }
 
+.viewer-surface canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .viewer-overlay {
+  grid-area: 1 / 1;
+  align-self: end;
   position: absolute;
   left: 10px;
   right: 10px;
@@ -1101,6 +1116,8 @@ textarea {
 }
 
 .viewer-hint {
+  grid-area: 1 / 1;
+  align-self: end;
   position: absolute;
   left: 16px;
   right: 16px;
