@@ -18,6 +18,9 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
 });
 
 const tierMap = new Map((bootstrap.tiers || []).map((tier) => [tier.key, tier]));
+const DEFAULT_TILE_ORDER = ['command', 'console', 'wall', 'directory'];
+const TILE_ORDER_STORAGE_KEY = 'prime.workspace.order';
+const initialTileOrder = loadTileOrder();
 
 const state = {
   donors: Array.isArray(bootstrap.donors) ? bootstrap.donors : [],
@@ -31,12 +34,20 @@ const state = {
   stripeReady: Boolean(bootstrap.stripeReady),
   selectedId: (bootstrap.donors && bootstrap.donors[0] && bootstrap.donors[0].id) || null,
   search: '',
+  tileOrder: initialTileOrder,
+  activePane: initialTileOrder[0] || 'command',
+  dragPane: null,
+  dropPane: null,
+  fitQueued: false,
   uploadedLogoUrl: '',
   uploadingLogo: false,
   refreshing: false,
 };
 
 const elements = {
+  workspace: document.querySelector('.workspace'),
+  tiles: Array.from(document.querySelectorAll('.workspace .tile')),
+  fitPanes: Array.from(document.querySelectorAll('[data-fit-pane]')),
   clock: document.getElementById('clockLabel'),
   metricRaised: document.getElementById('metricRaised'),
   metricDonors: document.getElementById('metricDonors'),
@@ -78,8 +89,10 @@ const elements = {
   viewerModal: document.getElementById('viewerModal'),
   closeViewerBtn: document.getElementById('closeViewerBtn'),
   focusSelectedBtn: document.getElementById('focusSelectedBtn'),
+  showAllBtn: document.getElementById('showAllBtn'),
   shuffleCameraBtn: document.getElementById('shuffleCameraBtn'),
   miniFocusBtn: document.getElementById('miniFocusBtn'),
+  miniShowAllBtn: document.getElementById('miniShowAllBtn'),
   toast: document.getElementById('toast'),
 };
 
@@ -126,14 +139,15 @@ class DonorWallViewer {
     this.cardEntries = [];
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x050608, 10, 28);
+    this.scene.fog = new THREE.Fog(0x050608, 20, 80);
     this.group = new THREE.Group();
     this.scene.add(this.group);
 
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-    this.camera.position.set(0, 1.2, 13);
+    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+    this.camera.position.set(0, 0, 30);
     this.cameraGoal = this.camera.position.clone();
-    this.targetGoal = new THREE.Vector3(0, 0.4, -1.6);
+    this.targetGoal = new THREE.Vector3(0, 0, 0);
+    this.keysPressed = {};
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -144,17 +158,18 @@ class DonorWallViewer {
     this.renderer.setClearColor(0x000000, 0);
     this.container.appendChild(this.renderer.domElement);
 
-    if (this.interactive) {
-      this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-      this.controls.enableDamping = true;
-      this.controls.enablePan = true;
-      this.controls.autoRotate = true;
-      this.controls.autoRotateSpeed = 0.45;
-      this.controls.minDistance = 7;
-      this.controls.maxDistance = 23;
-      this.controls.target.copy(this.targetGoal);
-    } else {
-      this.controls = null;
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.enablePan = true;
+    this.controls.autoRotate = this.autoRotate;
+    this.controls.autoRotateSpeed = 0.45;
+    this.controls.minDistance = 3;
+    this.controls.maxDistance = 80;
+    this.controls.zoomSpeed = 1.2;
+    this.controls.target.copy(this.targetGoal);
+    if (!this.interactive) {
+      this.controls.enableRotate = true;
+      this.controls.autoRotateSpeed = 0.3;
     }
 
     this.buildEnvironment();
@@ -174,27 +189,13 @@ class DonorWallViewer {
     rim.position.set(-10, 3, -8);
     this.scene.add(ambient, key, rim);
 
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(4.8, 0.04, 12, 100),
-      new THREE.MeshBasicMaterial({ color: 0xff8b38, transparent: true, opacity: 0.38 })
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(0, -2.8, -4.6);
-    this.scene.add(ring);
-
-    const grid = new THREE.GridHelper(28, 28, 0xff8b38, 0x26303a);
-    grid.position.y = -4.2;
-    grid.material.opacity = 0.28;
-    grid.material.transparent = true;
-    this.scene.add(grid);
-
     const starsGeometry = new THREE.BufferGeometry();
     const stars = [];
-    for (let index = 0; index < 700; index += 1) {
+    for (let index = 0; index < 1200; index += 1) {
       stars.push(
-        (Math.random() - 0.5) * 36,
-        (Math.random() - 0.5) * 18,
-        -Math.random() * 34
+        (Math.random() - 0.5) * 80,
+        (Math.random() - 0.5) * 40,
+        -Math.random() * 60
       );
     }
     starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(stars, 3));
@@ -213,6 +214,28 @@ class DonorWallViewer {
   bindEvents() {
     this.renderer.domElement.addEventListener('pointermove', (event) => this.onPointerMove(event));
     this.renderer.domElement.addEventListener('click', (event) => this.onClick(event));
+
+    this.renderer.domElement.setAttribute('tabindex', '0');
+    this.renderer.domElement.style.outline = 'none';
+
+    this.renderer.domElement.addEventListener('keydown', (event) => {
+      const key = event.key.toLowerCase();
+      if (['w', 'a', 's', 'd'].includes(key)) {
+        this.keysPressed[key] = true;
+        event.preventDefault();
+      }
+    });
+
+    this.renderer.domElement.addEventListener('keyup', (event) => {
+      const key = event.key.toLowerCase();
+      if (['w', 'a', 's', 'd'].includes(key)) {
+        this.keysPressed[key] = false;
+      }
+    });
+
+    this.renderer.domElement.addEventListener('blur', () => {
+      this.keysPressed = {};
+    });
   }
 
   resize() {
@@ -320,10 +343,7 @@ class DonorWallViewer {
     this.cardEntries = [];
 
     const list = Array.isArray(donors) ? donors : [];
-    const columns = Math.min(5, Math.max(3, Math.ceil(Math.sqrt(list.length || 1) + 1)));
-    const rows = Math.max(1, Math.ceil(list.length / columns));
-    const spread = Math.min(Math.PI * 1.26, Math.max(Math.PI * 0.92, columns * 0.32));
-    const radius = 8.5;
+    const spread = Math.max(8, Math.sqrt(list.length) * 5);
 
     list.forEach((donor, index) => {
       const texture = this.createCardTexture(donor);
@@ -335,16 +355,16 @@ class DonorWallViewer {
         emissiveIntensity: 0.48,
       });
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.88, 1, 1), material);
-      const row = Math.floor(index / columns);
-      const column = index % columns;
-      const ratio = columns === 1 ? 0.5 : column / (columns - 1);
-      const angle = -spread / 2 + ratio * spread;
-      const y = ((rows - 1) / 2 - row) * 2.28 + ((column % 2) * 0.16);
-      const x = Math.sin(angle) * radius;
-      const z = Math.cos(angle) * radius - radius - 2.2;
+
+      const golden = (1 + Math.sqrt(5)) / 2;
+      const theta = index * golden * Math.PI * 2;
+      const r = Math.sqrt(index + 0.5) / Math.sqrt(list.length) * spread;
+      const x = Math.cos(theta) * r;
+      const y = Math.sin(theta) * r;
+      const z = (Math.sin(index * 1.7) * 0.5 + Math.cos(index * 2.3) * 0.3) * 2;
 
       mesh.position.set(x, y, z);
-      mesh.lookAt(new THREE.Vector3(0, y * 0.32, 8));
+      mesh.rotation.z = (Math.random() - 0.5) * 0.12;
       mesh.userData.donorId = donor.id;
 
       this.group.add(mesh);
@@ -357,6 +377,43 @@ class DonorWallViewer {
         seed: Math.random() * Math.PI * 2,
       });
     });
+
+    this.frameDonors();
+  }
+
+  computeFitDistance() {
+    if (!this.cardEntries.length) {
+      return { center: new THREE.Vector3(), dist: 12 };
+    }
+
+    const box = new THREE.Box3();
+    this.cardEntries.forEach((entry) => {
+      box.expandByPoint(entry.basePosition);
+    });
+
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+
+    const fovRad = this.camera.fov * (Math.PI / 180);
+    const aspect = this.camera.aspect || 1;
+    const hFov = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
+    const pad = 2;
+    const distV = (size.y / 2 + pad) / Math.tan(fovRad / 2);
+    const distH = (size.x / 2 + pad) / Math.tan(hFov / 2);
+    const dist = Math.max(distV, distH, 10) * 1.15;
+
+    return { center, dist };
+  }
+
+  frameDonors() {
+    const { center, dist } = this.computeFitDistance();
+    this.targetGoal.copy(center);
+    this.cameraGoal.set(center.x, center.y, dist);
+    this.camera.position.copy(this.cameraGoal);
+    this.controls.target.copy(this.targetGoal);
+    this._animatingTo = false;
   }
 
   setSelected(id) {
@@ -369,14 +426,28 @@ class DonorWallViewer {
       return;
     }
 
-    this.targetGoal.set(entry.basePosition.x * 0.14, entry.basePosition.y * 0.22, entry.basePosition.z + 0.8);
-    this.cameraGoal.set(entry.basePosition.x * 0.28, entry.basePosition.y * 0.32 + 1.4, 8.9);
+    const pos = entry.basePosition;
+    this.targetGoal.set(pos.x, pos.y, pos.z);
+    this.cameraGoal.set(pos.x, pos.y, pos.z + 6.5);
+    this.controls.autoRotate = false;
+    this._animatingTo = true;
+  }
+
+  showAll() {
+    const { center, dist } = this.computeFitDistance();
+    this.targetGoal.copy(center);
+    this.cameraGoal.set(center.x, center.y, dist);
+    this.controls.autoRotate = false;
+    this._animatingTo = true;
   }
 
   shuffleCamera() {
+    const { center, dist } = this.computeFitDistance();
     const angle = Math.random() * Math.PI * 0.8 - Math.PI * 0.4;
-    this.cameraGoal.set(Math.sin(angle) * 5.6, 1.4 + Math.random() * 1.6, 10.2);
-    this.targetGoal.set(0, 0.4, -1.8);
+    this.cameraGoal.set(center.x + Math.sin(angle) * 6, center.y + Math.random() * 2 - 1, dist * 0.8);
+    this.targetGoal.copy(center);
+    this.controls.autoRotate = true;
+    this._animatingTo = true;
   }
 
   pick(pointerEvent) {
@@ -401,9 +472,47 @@ class DonorWallViewer {
   }
 
   animate() {
-    const elapsed = this.clock.getElapsedTime();
+    const delta = this.clock.getDelta();
+    this._elapsed = (this._elapsed || 0) + delta;
+    const elapsed = this._elapsed;
 
-    this.camera.position.lerp(this.cameraGoal, 0.08);
+    const hasWasd = this.keysPressed['w'] || this.keysPressed['a'] || this.keysPressed['s'] || this.keysPressed['d'];
+
+    if (hasWasd) {
+      const panSpeed = 12 * delta;
+      const forward = new THREE.Vector3();
+      this.camera.getWorldDirection(forward);
+      forward.y = 0;
+      forward.normalize();
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+      const move = new THREE.Vector3();
+      if (this.keysPressed['w']) move.addScaledVector(forward, panSpeed);
+      if (this.keysPressed['s']) move.addScaledVector(forward, -panSpeed);
+      if (this.keysPressed['a']) move.addScaledVector(right, -panSpeed);
+      if (this.keysPressed['d']) move.addScaledVector(right, panSpeed);
+
+      this.camera.position.add(move);
+      this.controls.target.add(move);
+      this.controls.autoRotate = false;
+      this._navigating = true;
+    }
+
+    if (this._navigating && !hasWasd) {
+      this._navigating = false;
+    }
+
+    if (this._animatingTo) {
+      const camDist = this.camera.position.distanceTo(this.cameraGoal);
+      const tgtDist = this.controls.target.distanceTo(this.targetGoal);
+      this.camera.position.lerp(this.cameraGoal, 0.08);
+      this.controls.target.lerp(this.targetGoal, 0.08);
+      if (camDist < 0.05 && tgtDist < 0.05) {
+        this.camera.position.copy(this.cameraGoal);
+        this.controls.target.copy(this.targetGoal);
+        this._animatingTo = false;
+      }
+    }
 
     this.cardEntries.forEach((entry, index) => {
       const selected = entry.donor.id === this.selectedId;
@@ -416,19 +525,28 @@ class DonorWallViewer {
       entry.mesh.material.emissiveIntensity += ((selected ? 0.82 : 0.48) - entry.mesh.material.emissiveIntensity) * 0.08;
     });
 
-    if (this.controls) {
-      this.controls.target.lerp(this.targetGoal, 0.08);
-      this.controls.update();
-    } else if (this.autoRotate) {
-      this.group.rotation.y += 0.0016;
-      this.camera.lookAt(this.targetGoal);
-    } else {
-      this.camera.lookAt(this.targetGoal);
-    }
-
+    this.controls.update();
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(this.animate);
   }
+}
+
+function loadTileOrder() {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(TILE_ORDER_STORAGE_KEY) || 'null');
+    if (
+      Array.isArray(raw) &&
+      raw.length === DEFAULT_TILE_ORDER.length &&
+      raw.every((paneId) => DEFAULT_TILE_ORDER.includes(paneId)) &&
+      new Set(raw).size === DEFAULT_TILE_ORDER.length
+    ) {
+      return raw;
+    }
+  } catch {
+    // Ignore malformed local workspace state and fall back to the default quadrant order.
+  }
+
+  return [...DEFAULT_TILE_ORDER];
 }
 
 function escapeHtml(value = '') {
@@ -523,6 +641,18 @@ function currentFormTier() {
   return elements.form.querySelector('input[name="tier"]:checked')?.value || 'legend';
 }
 
+function donorSceneSignature(donors = []) {
+  return donors.map((donor) => [
+    donor.id,
+    donor.company,
+    donor.tier,
+    donor.amountCents,
+    donor.headline,
+    donor.bio,
+    donor.image,
+  ].join('::')).join('|');
+}
+
 function selectedDonor() {
   return state.donors.find((donor) => donor.id === state.selectedId) || state.donors[0] || null;
 }
@@ -543,6 +673,164 @@ function showToast(message) {
   elements.toast.classList.add('is-visible');
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => elements.toast.classList.remove('is-visible'), 2600);
+}
+
+function saveTileOrder() {
+  try {
+    window.localStorage.setItem(TILE_ORDER_STORAGE_KEY, JSON.stringify(state.tileOrder));
+  } catch {
+    // Ignore storage failures; the live layout still works for the current session.
+  }
+}
+
+function schedulePaneFit() {
+  if (state.fitQueued) {
+    return;
+  }
+
+  state.fitQueued = true;
+  requestAnimationFrame(() => {
+    state.fitQueued = false;
+    elements.fitPanes.forEach((content) => {
+      const frame = content.parentElement;
+      if (!frame || !frame.clientWidth || !frame.clientHeight) {
+        return;
+      }
+
+      content.style.zoom = '1';
+      const naturalWidth = Math.max(content.scrollWidth, frame.clientWidth);
+      const naturalHeight = Math.max(content.scrollHeight, frame.clientHeight);
+      const scale = Math.min(1, frame.clientWidth / naturalWidth, frame.clientHeight / naturalHeight);
+      content.style.zoom = String(scale || 1);
+    });
+  });
+}
+
+function renderWorkspace() {
+  elements.tiles.forEach((tile) => {
+    const paneId = tile.dataset.pane || '';
+    tile.style.order = String(state.tileOrder.indexOf(paneId));
+    tile.classList.toggle('is-dragging', paneId === state.dragPane);
+    tile.classList.toggle('is-drop-target', paneId === state.dropPane && paneId !== state.dragPane);
+  });
+
+  schedulePaneFit();
+  requestAnimationFrame(() => miniViewer.resize());
+}
+
+function setActivePane(paneId) {
+  if (!state.tileOrder.includes(paneId)) {
+    return;
+  }
+
+  state.activePane = paneId;
+  renderWorkspace();
+}
+
+function swapTileOrder(sourceId, targetId) {
+  const sourceIndex = state.tileOrder.indexOf(sourceId);
+  const targetIndex = state.tileOrder.indexOf(targetId);
+
+  if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) {
+    return;
+  }
+
+  const nextOrder = [...state.tileOrder];
+  [nextOrder[sourceIndex], nextOrder[targetIndex]] = [nextOrder[targetIndex], nextOrder[sourceIndex]];
+  state.tileOrder = nextOrder;
+  saveTileOrder();
+}
+
+function clearTileDragState(nextActivePane = state.activePane) {
+  state.dragPane = null;
+  state.dropPane = null;
+  state.activePane = nextActivePane;
+  renderWorkspace();
+}
+
+function bindWorkspace() {
+  document.querySelectorAll('[data-drag-handle]').forEach((handle) => {
+    const paneId = handle.getAttribute('data-drag-handle') || handle.closest('.tile')?.dataset.pane || '';
+
+    handle.addEventListener('click', (event) => {
+      if (event.target.closest('button, input, a, label, textarea, select')) {
+        return;
+      }
+      event.stopPropagation();
+      setActivePane(paneId);
+    });
+
+    handle.addEventListener('dragstart', (event) => {
+      if (event.target.closest('button, input, a, label, textarea, select')) {
+        event.preventDefault();
+        return;
+      }
+
+      state.dragPane = paneId;
+      state.dropPane = paneId;
+      state.activePane = paneId;
+
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', paneId);
+        const tile = handle.closest('.tile');
+        if (tile) {
+          event.dataTransfer.setDragImage(tile, 28, 18);
+        }
+      }
+
+      renderWorkspace();
+    });
+
+    handle.addEventListener('dragend', () => {
+      clearTileDragState(state.dragPane || state.activePane);
+    });
+  });
+
+  elements.tiles.forEach((tile) => {
+    const paneId = tile.dataset.pane || '';
+
+    tile.addEventListener('click', () => {
+      setActivePane(paneId);
+    });
+
+    tile.addEventListener('dragover', (event) => {
+      if (!state.dragPane || state.dragPane === paneId) {
+        return;
+      }
+
+      event.preventDefault();
+      if (state.dropPane !== paneId) {
+        state.dropPane = paneId;
+        renderWorkspace();
+      }
+    });
+
+    tile.addEventListener('drop', (event) => {
+      const sourceId = state.dragPane || event.dataTransfer?.getData('text/plain') || '';
+      if (!sourceId || sourceId === paneId) {
+        clearTileDragState(sourceId || state.activePane);
+        return;
+      }
+
+      event.preventDefault();
+      swapTileOrder(sourceId, paneId);
+      clearTileDragState(sourceId);
+    });
+  });
+
+  elements.workspace.addEventListener('dragover', (event) => {
+    if (state.dragPane) {
+      event.preventDefault();
+    }
+  });
+
+  elements.workspace.addEventListener('drop', (event) => {
+    const targetTile = event.target.closest('.tile');
+    if (!targetTile && state.dragPane) {
+      clearTileDragState(state.dragPane);
+    }
+  });
 }
 
 function renderClock() {
@@ -570,6 +858,8 @@ function renderTiers() {
   elements.form.querySelectorAll('input[name="tier"]').forEach((input) => {
     input.addEventListener('change', renderPreview);
   });
+
+  schedulePaneFit();
 }
 
 function renderMetrics() {
@@ -577,11 +867,13 @@ function renderMetrics() {
   elements.metricDonors.textContent = String(state.stats.donorCount);
   elements.metricAverage.textContent = formatMoney(state.stats.averageGiftCents);
   elements.metricTier.textContent = getTier(state.stats.highestTier).label.toLowerCase();
+  schedulePaneFit();
 }
 
 function renderFeed() {
   if (!state.feed.length) {
     elements.feedList.innerHTML = '<div class="empty-state">No activity yet.</div>';
+    schedulePaneFit();
     return;
   }
 
@@ -591,6 +883,7 @@ function renderFeed() {
       <time>${escapeHtml(formatDate(item.createdAt))}</time>
     </article>
   `).join('');
+  schedulePaneFit();
 }
 
 function renderPreview() {
@@ -613,6 +906,8 @@ function renderPreview() {
     elements.previewAvatar.style.backgroundImage = '';
     elements.previewAvatar.style.color = '#201009';
   }
+
+  schedulePaneFit();
 }
 
 function renderDirectory() {
@@ -620,6 +915,7 @@ function renderDirectory() {
 
   if (!donors.length) {
     elements.donorList.innerHTML = '<div class="empty-state">No sponsors match that search.</div>';
+    schedulePaneFit();
     return;
   }
 
@@ -647,11 +943,16 @@ function renderDirectory() {
       setSelected(button.dataset.id);
     });
   });
+
+  schedulePaneFit();
 }
 
 function renderDetailPanel(target, donor) {
   if (!donor) {
     target.innerHTML = '<div class="empty-state">Select a sponsor to inspect its card.</div>';
+    if (target === elements.detailPanel) {
+      schedulePaneFit();
+    }
     return;
   }
 
@@ -695,6 +996,10 @@ function renderDetailPanel(target, donor) {
     </div>
     <p>${escapeHtml(donor.bio || 'No sponsor note was supplied yet.')}</p>
   `;
+
+  if (target === elements.detailPanel) {
+    schedulePaneFit();
+  }
 }
 
 function renderSelectionCopy() {
@@ -734,6 +1039,7 @@ function setSelected(id) {
   renderDetailPanel(elements.modalDetailPanel, selectedDonor());
   miniViewer.setSelected(id);
   fullViewer.setSelected(id);
+  miniViewer.showAll();
 }
 
 async function uploadLogo(file) {
@@ -787,6 +1093,7 @@ async function refreshData(showFeedback = false) {
 
   state.refreshing = true;
   elements.refreshBtn.disabled = true;
+  const previousScene = donorSceneSignature(state.donors);
 
   try {
     const response = await fetch('/api/donors.php', { headers: { Accept: 'application/json' } });
@@ -804,16 +1111,22 @@ async function refreshData(showFeedback = false) {
       state.selectedId = state.donors[0]?.id || null;
     }
 
+    const donorSceneChanged = donorSceneSignature(state.donors) !== previousScene;
+
     renderMetrics();
     renderFeed();
     renderDirectory();
     renderSelectionCopy();
     renderDetailPanel(elements.detailPanel, selectedDonor());
     renderDetailPanel(elements.modalDetailPanel, selectedDonor());
-    miniViewer.setDonors(state.donors);
-    fullViewer.setDonors(state.donors);
+
+    if (donorSceneChanged) {
+      miniViewer.setDonors(state.donors);
+      fullViewer.setDonors(state.donors);
+    }
     miniViewer.setSelected(state.selectedId);
     fullViewer.setSelected(state.selectedId);
+    miniViewer.showAll();
 
     if (showFeedback) {
       showToast('Data refreshed from PHP + SQLite.');
@@ -952,6 +1265,7 @@ function closeViewer(event) {
 function bindEvents() {
   renderClock();
   window.setInterval(renderClock, 60_000);
+  bindWorkspace();
 
   [
     elements.companyInput,
@@ -995,29 +1309,47 @@ function bindEvents() {
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && elements.viewerModal.classList.contains('is-open')) {
       closeViewer();
+      return;
+    }
+    const key = event.key.toLowerCase();
+    if (['w', 'a', 's', 'd'].includes(key) && elements.viewerModal.classList.contains('is-open')) {
+      fullViewer.keysPressed[key] = true;
+    }
+  });
+
+  document.addEventListener('keyup', (event) => {
+    const key = event.key.toLowerCase();
+    if (['w', 'a', 's', 'd'].includes(key)) {
+      fullViewer.keysPressed[key] = false;
     }
   });
 
   elements.focusSelectedBtn.addEventListener('click', () => fullViewer.focusSelected());
+  elements.showAllBtn.addEventListener('click', () => fullViewer.showAll());
   elements.shuffleCameraBtn.addEventListener('click', () => fullViewer.shuffleCamera());
   elements.miniFocusBtn.addEventListener('click', () => miniViewer.focusSelected());
+  elements.miniShowAllBtn.addEventListener('click', () => miniViewer.showAll());
 
-  window.setInterval(() => refreshData(false), 25_000);
+  // Manual refresh only — auto-refresh was resetting the 3D camera
+  window.addEventListener('resize', schedulePaneFit);
+  window.addEventListener('load', schedulePaneFit, { once: true });
+  document.fonts?.ready.then(schedulePaneFit);
 }
 
 const miniViewer = new DonorWallViewer(elements.miniViewer, {
-  interactive: false,
-  autoRotate: true,
+  interactive: true,
+  autoRotate: false,
   onSelect: (id) => setSelected(id),
 });
 
 const fullViewer = new DonorWallViewer(elements.fullViewer, {
   interactive: true,
-  autoRotate: true,
+  autoRotate: false,
   onSelect: (id) => setSelected(id),
 });
 
 function initialize() {
+  renderWorkspace();
   renderTiers();
   renderPreview();
   renderMetrics();
@@ -1031,6 +1363,9 @@ function initialize() {
   miniViewer.setSelected(state.selectedId);
   fullViewer.setSelected(state.selectedId);
   bindEvents();
+  miniViewer.showAll();
+  fullViewer.showAll();
+  schedulePaneFit();
   handlePaymentReturn();
 }
 
