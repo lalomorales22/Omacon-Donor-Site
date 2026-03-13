@@ -18,7 +18,7 @@ A Stripe-powered sponsorship platform for Omacon, the sold-out conference cohost
 ```bash
 cp .env.example .env
 # Fill in your Stripe keys in .env
-php -S 127.0.0.1:8000
+php -S localhost:8000
 ```
 
 Without Stripe keys the app runs in **demo mode** with three seeded sponsors.
@@ -85,21 +85,3 @@ Without Stripe keys the app runs in **demo mode** with three seeded sponsors.
 - Upload directory blocks PHP execution via `.htaccess`
 - JSON bootstrap uses `JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT`
 
-## Webhook Setup
-
-Point your Stripe webhook at `https://yourdomain.com/api/webhook.php` and subscribe to:
-
-- `checkout.session.completed`
-- `checkout.session.async_payment_succeeded`
-- `checkout.session.expired`
-
-## Next Phase: 3D Viewer Improvements
-
-The current Three.js viewer is too zoomed in. Planned work:
-
-- **Increase max zoom-out distance** on OrbitControls so the full sponsor wall is visible
-- **Wider default camera position** so the initial view shows all cards, not just one
-- **Better pan/orbit limits** to let users freely explore the scene without getting lost
-- **Responsive card layout** that spreads cards out more as the donor count grows
-- **Zoom-to-fit** button that auto-frames all sponsors in view
-- **Scroll-wheel sensitivity tuning** for smoother zoom transitions
