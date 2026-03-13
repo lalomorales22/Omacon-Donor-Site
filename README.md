@@ -2,8 +2,8 @@
 
 A Stripe-powered sponsorship platform for Omacon, the sold-out conference cohosted by ThePrimeagen and Teej. Sponsors check out through Stripe, land in SQLite, and appear on an interactive 3D wall built with Three.js.
 
-<img width="1382" height="916" alt="Screenshot 2026-03-13 at 1 04 16 AM" src="https://github.com/user-attachments/assets/a6dea674-9737-43a4-b27b-46d65ef2832a" />
-<img width="1382" height="916" alt="Screenshot 2026-03-13 at 1 04 03 AM" src="https://github.com/user-attachments/assets/daadb3bc-d05d-4faf-8449-69af28171dac" />
+<img width="1205" height="986" alt="Screenshot 2026-03-13 at 1 36 13 AM" src="https://github.com/user-attachments/assets/2b1d6fb6-1b7c-45b8-afee-cd0d47c276ce" />
+
 
 
 ## Stack
